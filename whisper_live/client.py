@@ -1,8 +1,12 @@
+import asyncio
 import os
 import shutil
+import subprocess
 import wave
 
 import logging
+from typing import AsyncIterable, AsyncGenerator
+
 import numpy as np
 import pyaudio
 import threading
@@ -22,15 +26,15 @@ class Client:
     END_OF_AUDIO = "END_OF_AUDIO"
 
     def __init__(
-        self,
-        host=None,
-        port=None,
-        lang=None,
-        translate=False,
-        model="small",
-        srt_file_path="output.srt",
-        use_vad=True,
-        log_transcription=True
+            self,
+            host=None,
+            port=None,
+            lang=None,
+            translate=False,
+            model="small",
+            srt_file_path="output.srt",
+            use_vad=True,
+            log_transcription=True
     ):
         """
         Initializes a Client instance for audio recording and streaming to a server.
@@ -59,6 +63,7 @@ class Client:
         self.last_segment = None
         self.last_received_segment = None
         self.log_transcription = log_transcription
+        self.ws_connected = False
 
         if translate:
             self.task = "translate"
@@ -83,8 +88,7 @@ class Client:
         Client.INSTANCES[self.uid] = self
 
         # start websocket client in a thread
-        self.ws_thread = threading.Thread(target=self.client_socket.run_forever)
-        self.ws_thread.setDaemon(True)
+        self.ws_thread = threading.Thread(target=self.client_socket.run_forever, daemon=True)
         self.ws_thread.start()
 
         self.transcript = []
@@ -112,7 +116,7 @@ class Client:
                     self.last_segment = seg
                 elif (self.server_backend == "faster_whisper" and
                       (not self.transcript or
-                        float(seg['start']) >= float(self.transcript[-1]['end']))):
+                       float(seg['start']) >= float(self.transcript[-1]['end']))):
                     self.transcript.append(seg)
         # update last received segment and last valid response time
         if self.last_received_segment is None or self.last_received_segment != segments[-1]["text"]:
@@ -179,6 +183,7 @@ class Client:
         print(f"[INFO]: Websocket connection closed: {close_status_code}: {close_msg}")
         self.recording = False
         self.waiting = False
+        self.ws_connected = False
 
     def on_open(self, ws):
         """
@@ -203,6 +208,7 @@ class Client:
                 }
             )
         )
+        self.ws_connected = True
 
     def send_packet_to_server(self, message):
         """
@@ -260,8 +266,10 @@ class Client:
     def wait_before_disconnect(self):
         """Waits a bit before disconnecting in order to process pending responses."""
         assert self.last_response_received
-        while time.time() - self.last_response_received < self.disconnect_if_no_response_for:
+        # (time.time() - self.last_response_received < self.disconnect_if_no_response_for) and
+        while self.ws_connected:
             continue
+        pass
 
 
 class TranscriptionTeeClient:
@@ -277,6 +285,7 @@ class TranscriptionTeeClient:
     Attributes:
         clients (list): the underlying Client instances responsible for handling WebSocket connections.
     """
+
     def __init__(self, clients, save_output_recording=False, output_recording_filename="./output_recording.wav"):
         self.clients = clients
         if not self.clients:
@@ -302,7 +311,8 @@ class TranscriptionTeeClient:
             print(f"[WARN]: Unable to access microphone. {error}")
             self.stream = None
 
-    def __call__(self, audio=None, rtsp_url=None, hls_url=None, save_file=None):
+    def __call__(self, audio=None, rtsp_url=None, hls_url=None, file_async_generator=None, save_file=None,
+                 pcm_generator=None, event_loop=None):
         """
         Start the transcription process.
 
@@ -315,7 +325,7 @@ class TranscriptionTeeClient:
 
         """
         assert sum(
-            source is not None for source in [audio, rtsp_url, hls_url]
+            source is not None for source in [audio, rtsp_url, hls_url, file_async_generator, pcm_generator]
         ) <= 1, 'You must provide only one selected source'
 
         print("[INFO]: Waiting for server ready ...")
@@ -333,6 +343,10 @@ class TranscriptionTeeClient:
             self.play_file(resampled_file)
         elif rtsp_url is not None:
             self.process_rtsp_stream(rtsp_url)
+        elif file_async_generator is not None:
+            event_loop.run_until_complete(self.process_async_generator(file_async_generator))
+        elif pcm_generator is not None:
+            event_loop.run_until_complete(self.stream_file_send(pcm_generator))
         else:
             self.record()
 
@@ -394,10 +408,17 @@ class TranscriptionTeeClient:
                     self.stream.write(data)
 
                 wavfile.close()
+                start_time = time.time()
+
+                self.multicast_packet(Client.END_OF_AUDIO.encode('utf-8'), True)
 
                 for client in self.clients:
                     client.wait_before_disconnect()
-                self.multicast_packet(Client.END_OF_AUDIO.encode('utf-8'), True)
+
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                print(f"Время выполнения команды : {elapsed_time:.4f} секунд")
+
                 self.write_all_clients_srt()
                 self.stream.close()
                 self.close_all_clients()
@@ -410,6 +431,37 @@ class TranscriptionTeeClient:
                 self.close_all_clients()
                 self.write_all_clients_srt()
                 print("[INFO]: Keyboard interrupt.")
+
+    async def stream_file_send(self, request_iterator: AsyncGenerator[bytes, None]):
+        try:
+            data = None
+            while any(client.recording for client in self.clients):
+                if data is not None:
+                    break
+                async for data in request_iterator:
+                    if data == b"":
+                        break
+
+                    audio_array = self.bytes_to_float_array(data)
+                    self.multicast_packet(audio_array.tobytes())
+                    # self.stream.write(data)
+
+            self.multicast_packet(Client.END_OF_AUDIO.encode('utf-8'), True)
+
+            for client in self.clients:
+                client.wait_before_disconnect()
+            self.write_all_clients_srt()
+            self.stream.close()
+            self.close_all_clients()
+            return
+
+        except KeyboardInterrupt:
+            self.stream.stop_stream()
+            self.stream.close()
+            self.p.terminate()
+            self.close_all_clients()
+            self.write_all_clients_srt()
+            print("[INFO]: Keyboard interrupt.")
 
     def process_rtsp_stream(self, rtsp_url):
         """
@@ -431,6 +483,39 @@ class TranscriptionTeeClient:
         """
         process = self.get_hls_ffmpeg_process(hls_url, save_file)
         self.handle_ffmpeg_process(process, stream_type='HLS')
+
+    async def process_async_generator(self, request_iterator: AsyncGenerator[bytes, None]):
+        process = await self.get_bytes_ffmpeg_process()
+        await self.handle_generator_ffmpeg_process(process, request_iterator)
+
+    async def get_bytes_ffmpeg_process(self):
+        process = (
+            ffmpeg
+            .input('pipe:0')
+            .output('-', format='s16le', acodec='pcm_s16le', ac=1, ar=self.rate)
+            .run_async(pipe_stdout=True, pipe_stderr=True, pipe_stdin=True)
+        )
+        return process
+
+    async def handle_generator_ffmpeg_process(self, process, bytes_data: AsyncGenerator[bytes, None]):
+        print(f"[INFO]: Connecting to Generator stream...")
+        stderr_thread = threading.Thread(target=self.consume_stderr, args=(process,))
+        stderr_thread.start()
+        try:
+            async for chunk in bytes_data:
+                process.stdin.write(chunk)
+                in_bytes = process.stdout.read(self.chunk)
+            audio_array = self.bytes_to_float_array(in_bytes)
+            self.multicast_packet(audio_array.tobytes())
+        except Exception as e:
+            print(f"[ERROR]: Failed to connect to Generator stream: {e}")
+        finally:
+            self.close_all_clients()
+            self.write_all_clients_srt()
+            if process:
+                process.kill()
+
+        print(f"[INFO]: Generator stream processing finished.")
 
     def handle_ffmpeg_process(self, process, stream_type):
         print(f"[INFO]: Connecting to {stream_type} stream...")
@@ -669,24 +754,27 @@ class TranscriptionClient(TranscriptionTeeClient):
         transcription_client()
         ```
     """
+
     def __init__(
-        self,
-        host,
-        port,
-        lang=None,
-        translate=False,
-        model="small",
-        use_vad=True,
-        save_output_recording=False,
-        output_recording_filename="./output_recording.wav",
-        output_transcription_path="./output.srt",
-        log_transcription=True,
+            self,
+            host,
+            port,
+            lang=None,
+            translate=False,
+            model="small",
+            use_vad=True,
+            save_output_recording=False,
+            output_recording_filename="./output_recording.wav",
+            output_transcription_path="./output.srt",
+            log_transcription=True,
     ):
-        self.client = Client(host, port, lang, translate, model, srt_file_path=output_transcription_path, use_vad=use_vad, log_transcription=log_transcription)
+        self.client = Client(host, port, lang, translate, model, srt_file_path=output_transcription_path,
+                             use_vad=use_vad, log_transcription=log_transcription)
         if save_output_recording and not output_recording_filename.endswith(".wav"):
             raise ValueError(f"Please provide a valid `output_recording_filename`: {output_recording_filename}")
         if not output_transcription_path.endswith(".srt"):
-            raise ValueError(f"Please provide a valid `output_transcription_path`: {output_transcription_path}. The file extension should be `.srt`.")
+            raise ValueError(
+                f"Please provide a valid `output_transcription_path`: {output_transcription_path}. The file extension should be `.srt`.")
         TranscriptionTeeClient.__init__(
             self,
             [self.client],
