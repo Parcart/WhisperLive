@@ -64,7 +64,6 @@ class Client:
         self.last_received_segment = None
         self.log_transcription = log_transcription
         self.ws_connected = False
-
         if translate:
             self.task = "translate"
 
@@ -88,7 +87,7 @@ class Client:
         Client.INSTANCES[self.uid] = self
 
         # start websocket client in a thread
-        self.ws_thread = threading.Thread(target=self.client_socket.run_forever, daemon=True)
+        self.ws_thread =  threading.Thread(target=self.client_socket.run_forever, daemon=True)
         self.ws_thread.start()
 
         self.transcript = []
@@ -389,6 +388,7 @@ class TranscriptionTeeClient:
 
         # read audio and create pyaudio stream
         with wave.open(filename, "rb") as wavfile:
+
             self.stream = self.p.open(
                 format=self.p.get_format_from_width(wavfile.getsampwidth()),
                 channels=wavfile.getnchannels(),
@@ -432,7 +432,7 @@ class TranscriptionTeeClient:
                 self.write_all_clients_srt()
                 print("[INFO]: Keyboard interrupt.")
 
-    async def stream_file_send(self, request_iterator: AsyncGenerator[bytes, None]):
+    async def streaming_audio(self, request_iterator: AsyncGenerator[bytes, None]):
         try:
             data = None
             while any(client.recording for client in self.clients):
@@ -462,6 +462,44 @@ class TranscriptionTeeClient:
             self.close_all_clients()
             self.write_all_clients_srt()
             print("[INFO]: Keyboard interrupt.")
+
+    def send_file(self, filename):
+
+        # read audio and create pyaudio stream
+        with wave.open(filename, "rb") as wavfile:
+            try:
+                data = b""
+                while any(client.recording for client in self.clients):
+                    chunk_data = wavfile.readframes(self.chunk)
+                    if chunk_data == b"":
+                        break
+                    data += chunk_data
+
+                audio_array = self.bytes_to_float_array(data)
+                self.multicast_packet(audio_array.tobytes())
+
+                wavfile.close()
+                start_time = time.time()
+
+                self.multicast_packet(Client.END_OF_AUDIO.encode('utf-8'), True)
+
+                for client in self.clients:
+                    client.wait_before_disconnect()
+
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                print(f"Время выполнения команды : {elapsed_time:.4f} секунд")
+
+                self.write_all_clients_srt()
+                self.close_all_clients()
+
+            except KeyboardInterrupt:
+                wavfile.close()
+                self.close_all_clients()
+                self.write_all_clients_srt()
+                print("[INFO]: Keyboard interrupt.")
+
+
 
     def process_rtsp_stream(self, rtsp_url):
         """
