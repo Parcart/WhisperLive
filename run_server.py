@@ -23,7 +23,7 @@ if __name__ == "__main__":
                         help='Boolean only for TensorRT model. True if multilingual.')
     parser.add_argument('--omp_num_threads', '-omp',
                         type=int,
-                        default=1,
+                        default=12,
                         help="Number of threads to use for OpenMP")
     parser.add_argument('--no_single_model', '-nsm',
                         action='store_true',
@@ -36,6 +36,15 @@ if __name__ == "__main__":
 
     if "OMP_NUM_THREADS" not in os.environ:
         os.environ["OMP_NUM_THREADS"] = str(args.omp_num_threads)
+
+    # if "LD_LIBRARY_PATH" not in os.environ:
+    #     import nvidia.cublas.lib
+    #     import nvidia.cudnn.lib
+    #     print(os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__))
+    #     os.environ["LD_LIBRARY_PATH"] = os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__)
+    # else:
+    #     print("LD_LIBRARY_PATH already set. Skipping.", os.environ["LD_LIBRARY_PATH"])
+
 
     from whisper_live.server import TranscriptionServer
     server = TranscriptionServer()
