@@ -22,5 +22,6 @@ ENV LD_LIBRARY_PATH="/usr/local/lib/python3.10/site-packages/nvidia/cublas/lib:/
 
 COPY whisper_live /app/whisper_live
 COPY run_server.py /app
+COPY huggingface /root/.cache/huggingface
 
 CMD ["python", "run_server.py", "--port", "9090", "--backend", "faster_whisper"]
