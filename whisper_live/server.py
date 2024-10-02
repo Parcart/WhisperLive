@@ -477,6 +477,7 @@ class ServeClientBase(object):
         no valid segment for the last 30 seconds from whisper
         """
         if self.frames_np[int((self.timestamp_offset - self.frames_offset) * self.RATE):].shape[0] > 25 * self.RATE:
+            print("clipping audio")
             duration = self.frames_np.shape[0] / self.RATE
             self.timestamp_offset = self.frames_offset + duration - 5
 
@@ -497,7 +498,8 @@ class ServeClientBase(object):
         samples_take = max(0, (self.timestamp_offset - self.frames_offset) * self.RATE)
         input_bytes = self.frames_np[int(samples_take):].copy()
         duration = input_bytes.shape[0] / self.RATE
-        return input_bytes, duration
+        full_duration = self.frames_np.shape[0] / self.RATE
+        return input_bytes, duration, full_duration
 
     def prepare_segments(self, last_segment=None):
         """
@@ -553,6 +555,7 @@ class ServeClientBase(object):
                     "segments": segments,
                 })
             )
+            logging.info(f"Sent {len(segments)} segments to client.")
         except Exception as e:
             logging.error(f"[ERROR]: Sending data to client: {e}")
 
@@ -975,6 +978,7 @@ class ServeClientFasterWhisper(ServeClientBase):
             Exception: If there is an issue with audio processing or WebSocket communication.
 
         """
+        last_full_duration = 0.0
         while True:
 
             need_exit = False
@@ -987,19 +991,25 @@ class ServeClientFasterWhisper(ServeClientBase):
                 continue
 
             if self.file_ended:
+                print("INFO: File ended")
                 need_exit = True
 
             self.clip_audio_if_no_valid_segment()
 
-            input_bytes, duration = self.get_audio_chunk_for_processing()
+            input_bytes, duration, full_duration = self.get_audio_chunk_for_processing()
+            print(f"Full duration: {full_duration}")
             if duration < 1.0 and not self.file_ended:
-                time.sleep(0.1)  # wait for audio chunks to arrive
+                time.sleep(0.25)  # wait for audio chunks to arrive
                 continue
 
-            if self.file_ended and duration < 0.25:
+
+            if self.file_ended and (duration <= full_duration * 0.05 and duration < 1.0):
                 self.exit = True
                 continue
 
+            if full_duration == last_full_duration and not self.file_ended:
+                time.sleep(0.25)
+                continue
 
             try:
                 input_sample = input_bytes.copy()
@@ -1013,6 +1023,8 @@ class ServeClientFasterWhisper(ServeClientBase):
 
                 if need_exit:
                     self.exit = True
+
+                last_full_duration = full_duration
 
             except Exception as e:
                 logging.error(f"[ERROR]: Failed to transcribe audio chunk: {e}")
