@@ -147,11 +147,11 @@ class BackendType(Enum):
 class TranscriptionServer:
     RATE = 16000
 
-    def __init__(self):
+    def __init__(self, single_model=False):
         self.client_manager = ClientManager()
         self.no_voice_activity_chunks = 0
         self.use_vad = True
-        self.single_model = False
+        self.single_model = single_model
         self.file_end = False
 
     def initialize_client(
@@ -344,7 +344,23 @@ class TranscriptionServer:
                 self.single_model = True
                 # TODO: load model initially
             else:
-                logging.info("Single model mode currently only works with custom models.")
+                logging.info(f"Load single model {backend}")
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                if device == "cuda":
+                    major, _ = torch.cuda.get_device_capability(device)
+                    compute_type = "float16" if major >= 7 else "float32"
+                else:
+                    compute_type = "int8"
+                ServeClientFasterWhisper.SINGLE_MODEL = WhisperModel(
+                    model_size_or_path="large-v2",
+                    device=device,
+                    compute_type=compute_type,
+                    local_files_only=False,
+                )
+                logging.info(f"Loaded {backend}")
+        else:
+            logging.info(f"Load no single mode {backend}")
+
         if not BackendType.is_valid(backend):
             raise ValueError(f"{backend} is not a valid backend type. Choose backend from {BackendType.valid_types()}")
         with serve(
@@ -1001,7 +1017,6 @@ class ServeClientFasterWhisper(ServeClientBase):
             if duration < 1.0 and not self.file_ended:
                 time.sleep(0.25)  # wait for audio chunks to arrive
                 continue
-
 
             if self.file_ended and (duration <= full_duration * 0.05 and duration < 1.0):
                 self.exit = True

@@ -288,7 +288,6 @@ class AsyncClient:
 
 class TranscriptionTeeClient:
 
-
     def __init__(self, clients, eventloop, save_output_recording=False,
                  output_recording_filename="./output_recording.wav"):
         self.clients = clients
@@ -316,8 +315,7 @@ class TranscriptionTeeClient:
             print(f"[WARN]: Unable to access microphone. {error}")
             self.stream = None
 
-    async def __call__(self, audio=None, rtsp_url=None, hls_url=None, file_async_generator=None, save_file=None,
-                       pcm_generator=None, async_audio_generator=None):
+    async def __call__(self, audio=None, async_audio_generator=None):
         """
         Start the transcription process.
 
@@ -330,7 +328,8 @@ class TranscriptionTeeClient:
 
         """
         assert sum(
-            source is not None for source in [audio, rtsp_url, hls_url, file_async_generator, pcm_generator, async_audio_generator]
+            source is not None for source in
+            [audio, async_audio_generator]
         ) <= 1, 'You must provide only one selected source'
 
         await self.await_server_ready()
@@ -351,11 +350,12 @@ class TranscriptionTeeClient:
         elif async_audio_generator is not None:
             await self.streaming_audio(async_audio_generator)
         else:
-            self.record()
+            raise
 
     async def await_server_ready(self):
         print("[INFO]: Waiting for server ready ...")
         for client in self.clients:
+            # recording = True -> server is ready
             while not client.recording:
                 await asyncio.sleep(0.1)
                 if client.waiting or client.server_error:
@@ -468,7 +468,7 @@ class TranscriptionTeeClient:
             await self.close_all_clients()
             end_time = time.time()
             elapsed_time = end_time - start_time
-            print(f"Время обработки последнего сегмаента : {elapsed_time:.4f} секунд")
+            print(f"Время обработки последнего сегмента : {elapsed_time:.4f} секунд")
             return
 
         except KeyboardInterrupt:
@@ -512,196 +512,6 @@ class TranscriptionTeeClient:
                 self.write_all_clients_srt()
                 print("[INFO]: Keyboard interrupt.")
 
-    def process_rtsp_stream(self, rtsp_url):
-        """
-        Connect to an RTSP source, process the audio stream, and send it for trascription.
-
-        Args:
-            rtsp_url (str): The URL of the RTSP stream source.
-        """
-        process = self.get_rtsp_ffmpeg_process(rtsp_url)
-        self.handle_ffmpeg_process(process, stream_type='RTSP')
-
-    def process_hls_stream(self, hls_url, save_file):
-        """
-        Connect to an HLS source, process the audio stream, and send it for transcription.
-
-        Args:
-            hls_url (str): The URL of the HLS stream source.
-            save_file （str, optional): Local path to save the network stream.
-        """
-        process = self.get_hls_ffmpeg_process(hls_url, save_file)
-        self.handle_ffmpeg_process(process, stream_type='HLS')
-
-    async def process_async_generator(self, request_iterator: AsyncGenerator[bytes, None]):
-        process = await self.get_bytes_ffmpeg_process()
-        await self.handle_generator_ffmpeg_process(process, request_iterator)
-
-    async def get_bytes_ffmpeg_process(self):
-        process = (
-            ffmpeg
-            .input('pipe:0')
-            .output('-', format='s16le', acodec='pcm_s16le', ac=1, ar=self.rate)
-            .run_async(pipe_stdout=True, pipe_stderr=True, pipe_stdin=True)
-        )
-        return process
-
-    async def handle_generator_ffmpeg_process(self, process, bytes_data: AsyncGenerator[bytes, None]):
-        print(f"[INFO]: Connecting to Generator stream...")
-        stderr_thread = threading.Thread(target=self.consume_stderr, args=(process,))
-        stderr_thread.start()
-        try:
-            async for chunk in bytes_data:
-                process.stdin.write(chunk)
-                in_bytes = process.stdout.read(self.chunk)
-            audio_array = self.bytes_to_float_array(in_bytes)
-            self.multicast_packet(audio_array.tobytes())
-        except Exception as e:
-            print(f"[ERROR]: Failed to connect to Generator stream: {e}")
-        finally:
-            self.close_all_clients()
-            self.write_all_clients_srt()
-            if process:
-                process.kill()
-
-        print(f"[INFO]: Generator stream processing finished.")
-
-    def handle_ffmpeg_process(self, process, stream_type):
-        print(f"[INFO]: Connecting to {stream_type} stream...")
-        stderr_thread = threading.Thread(target=self.consume_stderr, args=(process,))
-        stderr_thread.start()
-        try:
-            # Process the stream
-            while True:
-                in_bytes = process.stdout.read(self.chunk * 2)  # 2 bytes per sample
-                if not in_bytes:
-                    break
-                audio_array = self.bytes_to_float_array(in_bytes)
-                self.multicast_packet(audio_array.tobytes())
-
-        except Exception as e:
-            print(f"[ERROR]: Failed to connect to {stream_type} stream: {e}")
-        finally:
-            self.close_all_clients()
-            self.write_all_clients_srt()
-            if process:
-                process.kill()
-
-        print(f"[INFO]: {stream_type} stream processing finished.")
-
-    def get_rtsp_ffmpeg_process(self, rtsp_url):
-        return (
-            ffmpeg
-            .input(rtsp_url, threads=0)
-            .output('-', format='s16le', acodec='pcm_s16le', ac=1, ar=self.rate)
-            .run_async(pipe_stdout=True, pipe_stderr=True)
-        )
-
-    def get_hls_ffmpeg_process(self, hls_url, save_file):
-        if save_file is None:
-            process = (
-                ffmpeg
-                .input(hls_url, threads=0)
-                .output('-', format='s16le', acodec='pcm_s16le', ac=1, ar=self.rate)
-                .run_async(pipe_stdout=True, pipe_stderr=True)
-            )
-        else:
-            input = ffmpeg.input(hls_url, threads=0)
-            output_file = input.output(save_file, acodec='copy', vcodec='copy').global_args('-loglevel', 'quiet')
-            output_std = input.output('-', format='s16le', acodec='pcm_s16le', ac=1, ar=self.rate)
-            process = (
-                ffmpeg.merge_outputs(output_file, output_std)
-                .run_async(pipe_stdout=True, pipe_stderr=True)
-            )
-
-        return process
-
-    def consume_stderr(self, process):
-        """
-        Consume and log the stderr output of a process in a separate thread.
-
-        Args:
-            process (subprocess.Popen): The process whose stderr output will be logged.
-        """
-        for line in iter(process.stderr.readline, b""):
-            logging.debug(f'[STDERR]: {line.decode()}')
-
-    def save_chunk(self, n_audio_file):
-        """
-        Saves the current audio frames to a WAV file in a separate thread.
-
-        Args:
-        n_audio_file (int): The index of the audio file which determines the filename.
-                            This helps in maintaining the order and uniqueness of each chunk.
-        """
-        t = threading.Thread(
-            target=self.write_audio_frames_to_file,
-            args=(self.frames[:], f"chunks/{n_audio_file}.wav",),
-        )
-        t.start()
-
-    def finalize_recording(self, n_audio_file):
-        """
-        Finalizes the recording process by saving any remaining audio frames,
-        closing the audio stream, and terminating the process.
-
-        Args:
-        n_audio_file (int): The file index to be used if there are remaining audio frames to be saved.
-                            This index is incremented before use if the last chunk is saved.
-        """
-        if self.save_output_recording and len(self.frames):
-            self.write_audio_frames_to_file(
-                self.frames[:], f"chunks/{n_audio_file}.wav"
-            )
-            n_audio_file += 1
-        self.stream.stop_stream()
-        self.stream.close()
-        self.p.terminate()
-        self.close_all_clients()
-        if self.save_output_recording:
-            self.write_output_recording(n_audio_file)
-        self.write_all_clients_srt()
-
-    def record(self):
-        """
-        Record audio data from the input stream and save it to a WAV file.
-
-        Continuously records audio data from the input stream, sends it to the server via a WebSocket
-        connection, and simultaneously saves it to multiple WAV files in chunks. It stops recording when
-        the `RECORD_SECONDS` duration is reached or when the `RECORDING` flag is set to `False`.
-
-        Audio data is saved in chunks to the "chunks" directory. Each chunk is saved as a separate WAV file.
-        The recording will continue until the specified duration is reached or until the `RECORDING` flag is set to `False`.
-        The recording process can be interrupted by sending a KeyboardInterrupt (e.g., pressing Ctrl+C). After recording,
-        the method combines all the saved audio chunks into the specified `out_file`.
-        """
-        n_audio_file = 0
-        if self.save_output_recording:
-            if os.path.exists("chunks"):
-                shutil.rmtree("chunks")
-            os.makedirs("chunks")
-        try:
-            for _ in range(0, int(self.rate / self.chunk * self.record_seconds)):
-                if not any(client.recording for client in self.clients):
-                    break
-                data = self.stream.read(self.chunk, exception_on_overflow=False)
-                self.frames += data
-
-                audio_array = self.bytes_to_float_array(data)
-
-                self.multicast_packet(audio_array.tobytes())
-
-                # save frames if more than a minute
-                if len(self.frames) > 60 * self.rate:
-                    if self.save_output_recording:
-                        self.save_chunk(n_audio_file)
-                        n_audio_file += 1
-                    self.frames = b""
-            self.write_all_clients_srt()
-
-        except KeyboardInterrupt:
-            self.finalize_recording(n_audio_file)
-
     def write_audio_frames_to_file(self, frames, file_name):
         """
         Write audio frames to a WAV file.
@@ -720,44 +530,6 @@ class TranscriptionTeeClient:
             wavfile.setsampwidth(2)
             wavfile.setframerate(self.rate)
             wavfile.writeframes(frames)
-
-    def write_output_recording(self, n_audio_file):
-        """
-        Combine and save recorded audio chunks into a single WAV file.
-
-        The individual audio chunk files are expected to be located in the "chunks" directory. Reads each chunk
-        file, appends its audio data to the final recording, and then deletes the chunk file. After combining
-        and saving, the final recording is stored in the specified `out_file`.
-
-
-        Args:
-            n_audio_file (int): The number of audio chunk files to combine.
-            out_file (str): The name of the output WAV file to save the final recording.
-
-        """
-        input_files = [
-            f"chunks/{i}.wav"
-            for i in range(n_audio_file)
-            if os.path.exists(f"chunks/{i}.wav")
-        ]
-        with wave.open(self.output_recording_filename, "wb") as wavfile:
-            wavfile: wave.Wave_write
-            wavfile.setnchannels(self.channels)
-            wavfile.setsampwidth(2)
-            wavfile.setframerate(self.rate)
-            for in_file in input_files:
-                with wave.open(in_file, "rb") as wav_in:
-                    while True:
-                        data = wav_in.readframes(self.chunk)
-                        if data == b"":
-                            break
-                        wavfile.writeframes(data)
-                # remove this file
-                os.remove(in_file)
-        wavfile.close()
-        # clean up temporary directory to store chunks
-        if os.path.exists("chunks"):
-            shutil.rmtree("chunks")
 
     @staticmethod
     def bytes_to_float_array(audio_bytes):

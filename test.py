@@ -9,6 +9,7 @@ import pyaudio
 from whisper_live.async_client import AsyncTranscriptionClient as TranscriptionClient
 import whisper_live.utils as utils
 
+
 # client = TranscriptionClient(
 #     "localhost",
 #     9090,
@@ -22,7 +23,7 @@ async def async_audio_stream_generator(filename):
     try:
         async with aiofiles.open(filename, "rb") as wavfile:
             start_time = time.time()
-        # with wave.open(filename, "rb") as wavfile:
+            # with wave.open(filename, "rb") as wavfile:
             try:
                 while True:
                     # print("INFO: streaming file", filename)
@@ -45,6 +46,7 @@ async def async_audio_stream_generator(filename):
     except Exception as e:
         print(e)
 
+
 # client()
 
 async def readfile(filename):
@@ -64,6 +66,7 @@ async def async_FileStreamSTT(client, filename, name):
     elapsed_time = end_time - start_time
     print(f"Время выполнения команды '{name}': {elapsed_time:.4f} секунд")
     print("Результат выполнения STT: " + result)
+
 
 async def async_AudioStreamSTT(client, filename, name):
     start_time = time.time()
@@ -87,7 +90,8 @@ async def create_and_run_tasks():
         use_vad=False,
         eventloop=asyncio.get_running_loop()
     )
-    tasks.append(asyncio.create_task(async_AudioStreamSTT(client, "tests/test_woman_resampled16000.wav", "Test1"), name="Test1"))
+    tasks.append(
+        asyncio.create_task(async_AudioStreamSTT(client, "tests/test_woman_resampled16000.wav", "Test1"), name="Test1"))
     client2 = TranscriptionClient(
         "localhost",
         9090,
@@ -97,14 +101,17 @@ async def create_and_run_tasks():
         use_vad=False,
         eventloop=asyncio.get_running_loop()
     )
-    tasks.append(asyncio.create_task(async_AudioStreamSTT(client2, "tests/test_1_resampled.wav", "Test2"), name="Test2"))
+    tasks.append(
+        asyncio.create_task(async_AudioStreamSTT(client2, "tests/test_1_resampled.wav", "Test2"), name="Test2"))
+
     result = asyncio.gather(*tasks)
     await result
 
 
 async def main():
-
-    await create_and_run_tasks()
+    # await create_and_run_tasks()
+    result = asyncio.gather(create_and_run_tasks())
+    await result
     pass
 
 
