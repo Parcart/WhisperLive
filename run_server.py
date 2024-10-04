@@ -37,6 +37,10 @@ if __name__ == "__main__":
     if "OMP_NUM_THREADS" not in os.environ:
         os.environ["OMP_NUM_THREADS"] = str(args.omp_num_threads)
 
+    if "NSM_FLAG" in os.environ:
+        if os.environ["NSM_FLAG"] == "-nsm":
+            args.no_single_model = True
+
     # if "LD_LIBRARY_PATH" not in os.environ:
     #     import nvidia.cublas.lib
     #     import nvidia.cudnn.lib

@@ -122,3 +122,6 @@ if __name__ == '__main__':
 
 #     with multiprocessing.Pool(processes=4) as pool:
 #         pool.map(stream_file, ["1", "2", "3", "4"])
+
+from faster_whisper.utils import download_model
+
