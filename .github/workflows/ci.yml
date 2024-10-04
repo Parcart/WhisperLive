@@ -155,7 +155,7 @@ jobs:
           context: .
           file: docker/Dockerfile.gpu
           push: true
-          tags: ghcr.io/collabora/whisperlive-gpu:latest
+          tags: ghcr.io/Parcart/whisperlive-gpu:latest
 
   publish-to-pypi:
     needs: [run-tests, check-code-format]
