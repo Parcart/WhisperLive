@@ -11,3 +11,4 @@ evaluate
 numpy<2
 tiktoken==0.3.3
 openai-whisper
+torch==2.3.1

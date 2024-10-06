@@ -41,13 +41,13 @@ if __name__ == "__main__":
         if os.environ["NSM_FLAG"] == "-nsm":
             args.no_single_model = True
 
-    # if "LD_LIBRARY_PATH" not in os.environ:
-    #     import nvidia.cublas.lib
-    #     import nvidia.cudnn.lib
-    #     print(os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__))
-    #     os.environ["LD_LIBRARY_PATH"] = os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__)
-    # else:
-    #     print("LD_LIBRARY_PATH already set. Skipping.", os.environ["LD_LIBRARY_PATH"])
+    if "LD_LIBRARY_PATH" not in os.environ:
+        import nvidia.cublas.lib
+        import nvidia.cudnn.lib
+        print(os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__))
+        os.environ["LD_LIBRARY_PATH"] = os.path.dirname(nvidia.cublas.lib.__file__) + ":" + os.path.dirname(nvidia.cudnn.lib.__file__)
+    else:
+        print("LD_LIBRARY_PATH already set. Skipping.", os.environ["LD_LIBRARY_PATH"])
 
 
     from whisper_live.server import TranscriptionServer

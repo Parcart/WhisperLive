@@ -8,7 +8,7 @@ import pyaudio
 
 from whisper_live.async_client import AsyncTranscriptionClient as TranscriptionClient
 import whisper_live.utils as utils
-
+result = []
 
 # client = TranscriptionClient(
 #     "localhost",
@@ -72,11 +72,15 @@ async def async_AudioStreamSTT(client, filename, name):
     start_time = time.time()
     request_iterator = async_audio_stream_generator(filename)
     await client(async_audio_generator=request_iterator)
-    result = "".join([transcript["text"] for transcript in client.clients[0].transcript])
+    result_stt = "".join([transcript["text"] for transcript in client.clients[0].transcript])
     end_time = time.time()
     elapsed_time = end_time - start_time
-    print(f"Время выполнения команды '{name}': {elapsed_time:.4f} секунд")
-    print("Результат выполнения STT: " + result)
+    complete_time = f"Время выполнения команды '{name}': {elapsed_time:.4f} секунд"
+    result_stt_str = f"Результат выполнения STT: {result_stt}"
+    result.append(complete_time)
+    result.append(result_stt_str)
+    print(complete_time)
+    print(result_stt_str)
 
 
 async def create_and_run_tasks():
@@ -92,20 +96,21 @@ async def create_and_run_tasks():
     )
     tasks.append(
         asyncio.create_task(async_AudioStreamSTT(client, "tests/test_woman_resampled16000.wav", "Test1"), name="Test1"))
-    client2 = TranscriptionClient(
-        "localhost",
-        9090,
-        lang=None,
-        translate=False,
-        model="large-v2",
-        use_vad=False,
-        eventloop=asyncio.get_running_loop()
-    )
-    tasks.append(
-        asyncio.create_task(async_AudioStreamSTT(client2, "tests/test_1_resampled.wav", "Test2"), name="Test2"))
+    # client2 = TranscriptionClient(
+    #     "213.181.122.2",
+    #     40054,
+    #     lang=None,
+    #     translate=False,
+    #     model="large-v2",
+    #     use_vad=False,
+    #     eventloop=asyncio.get_running_loop()
+    # )
+    # tasks.append(
+    #     asyncio.create_task(async_AudioStreamSTT(client2, "tests/test_1_resampled.wav", "Test2"), name="Test2"))
 
     result = asyncio.gather(*tasks)
     await result
+    [print(r) for r in result]
 
 
 async def main():
@@ -124,4 +129,3 @@ if __name__ == '__main__':
 #         pool.map(stream_file, ["1", "2", "3", "4"])
 
 from faster_whisper.utils import download_model
-
