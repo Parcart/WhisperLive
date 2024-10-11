@@ -7,6 +7,7 @@ import logging
 from enum import Enum
 from typing import List, Optional
 
+import subprocess as sp
 import torch
 import numpy as np
 from websockets.sync.server import serve
@@ -23,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 class ClientManager:
-    def __init__(self, max_clients=4, max_connection_time=600):
+    def __init__(self, max_clients, max_connection_time=600):
         """
         Initializes the ClientManager with specified limits on client connections and connection durations.
 
@@ -32,9 +33,12 @@ class ClientManager:
             max_connection_time (int, optional): The maximum duration (in seconds) a client can stay connected. Defaults
                                                  to 600 seconds (10 minutes).
         """
+        command = "nvidia-smi --query-gpu=memory.free --format=csv"
+        memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
+        memory_free = sum([int(x.split()[0]) for i, x in enumerate(memory_free_info)])
+        self.max_clients = int(memory_free / 3584)
         self.clients = {}
         self.start_times = {}
-        self.max_clients = max_clients
         self.max_connection_time = max_connection_time
 
     def add_client(self, websocket, client):
@@ -838,15 +842,19 @@ class ServeClientFasterWhisper(ServeClientBase):
         # threading
         self.trans_thread = threading.Thread(target=self.speech_to_text)
         self.trans_thread.start()
-        self.websocket.send(
-            json.dumps(
-                {
-                    "uid": self.client_uid,
-                    "message": self.SERVER_READY,
-                    "backend": "faster_whisper"
-                }
+        try:
+            self.websocket.send(
+                json.dumps(
+                    {
+                        "uid": self.client_uid,
+                        "message": self.SERVER_READY,
+                        "backend": "faster_whisper"
+                    }
+                )
             )
-        )
+        except Exception as e:
+            logging.error(f"Error sending ready message: {e}")
+            self.file_ended = True
 
     def create_model(self, device):
         """
@@ -1003,12 +1011,17 @@ class ServeClientFasterWhisper(ServeClientBase):
                 logging.info("Exiting speech to text thread")
                 break
 
+            if self.file_ended:
+                if self.frames_np is not None:
+                    print("INFO: File ended")
+                    need_exit = True
+                else:
+                    self.exit = True
+                    continue
+
             if self.frames_np is None:
                 continue
 
-            if self.file_ended:
-                print("INFO: File ended")
-                need_exit = True
 
             self.clip_audio_if_no_valid_segment()
 

@@ -96,17 +96,17 @@ async def create_and_run_tasks():
     )
     tasks.append(
         asyncio.create_task(async_AudioStreamSTT(client, "tests/test_woman_resampled16000.wav", "Test1"), name="Test1"))
-    # client2 = TranscriptionClient(
-    #     "213.181.122.2",
-    #     40054,
-    #     lang=None,
-    #     translate=False,
-    #     model="large-v2",
-    #     use_vad=False,
-    #     eventloop=asyncio.get_running_loop()
-    # )
-    # tasks.append(
-    #     asyncio.create_task(async_AudioStreamSTT(client2, "tests/test_1_resampled.wav", "Test2"), name="Test2"))
+    client2 = TranscriptionClient(
+        "localhost",
+        9090,
+        lang=None,
+        translate=False,
+        model="large-v2",
+        use_vad=False,
+        eventloop=asyncio.get_running_loop()
+    )
+    tasks.append(
+        asyncio.create_task(async_AudioStreamSTT(client2, "tests/test_1_resampled.wav", "Test2"), name="Test2"))
 
     result = asyncio.gather(*tasks)
     await result
