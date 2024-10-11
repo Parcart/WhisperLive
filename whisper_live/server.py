@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 class ClientManager:
-    def __init__(self, max_clients, max_connection_time=600):
+    def __init__(self, max_clients=4, max_connection_time=600):
         """
         Initializes the ClientManager with specified limits on client connections and connection durations.
 
@@ -37,6 +37,8 @@ class ClientManager:
         memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
         memory_free = sum([int(x.split()[0]) for i, x in enumerate(memory_free_info)])
         self.max_clients = int(memory_free / 3584)
+        print("INFO Max clients:", self.max_clients)
+        print("INFO Memory:", memory_free)
         self.clients = {}
         self.start_times = {}
         self.max_connection_time = max_connection_time
@@ -826,14 +828,21 @@ class ServeClientFasterWhisper(ServeClientBase):
             return
         logging.info(f"Using Device={device} with precision {self.compute_type}")
 
-        if single_model:
-            if ServeClientFasterWhisper.SINGLE_MODEL is None:
-                self.create_model(device)
-                ServeClientFasterWhisper.SINGLE_MODEL = self.transcriber
+        try:
+            if single_model:
+                if ServeClientFasterWhisper.SINGLE_MODEL is None:
+                    self.create_model(device)
+                    ServeClientFasterWhisper.SINGLE_MODEL = self.transcriber
+                else:
+                    self.transcriber = ServeClientFasterWhisper.SINGLE_MODEL
             else:
-                self.transcriber = ServeClientFasterWhisper.SINGLE_MODEL
-        else:
-            self.create_model(device)
+                self.create_model(device)
+        except Exception as e:
+            logging.error(f"Error creating model: {e}")
+            self.file_ended = True
+            self.websocket.close(code=1011, reason=str(e))
+            raise e
+
 
         self.use_vad = use_vad
 
@@ -855,6 +864,7 @@ class ServeClientFasterWhisper(ServeClientBase):
         except Exception as e:
             logging.error(f"Error sending ready message: {e}")
             self.file_ended = True
+            raise e
 
     def create_model(self, device):
         """

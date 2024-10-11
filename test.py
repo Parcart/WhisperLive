@@ -83,11 +83,11 @@ async def async_AudioStreamSTT(client, filename, name):
     print(result_stt_str)
 
 
-async def create_and_run_tasks():
+async def create_and_run_tasks(ip="localhost", port='9090'):
     tasks = list()
     client = TranscriptionClient(
-        "localhost",
-        9090,
+        ip,
+        port,
         lang=None,
         translate=False,
         model="large-v2",
@@ -96,9 +96,9 @@ async def create_and_run_tasks():
     )
     tasks.append(
         asyncio.create_task(async_AudioStreamSTT(client, "tests/test_woman_resampled16000.wav", "Test1"), name="Test1"))
-    client2 = TranscriptionClient(
-        "localhost",
-        9090,
+    client = TranscriptionClient(
+        ip,
+        port,
         lang=None,
         translate=False,
         model="large-v2",
@@ -106,7 +106,51 @@ async def create_and_run_tasks():
         eventloop=asyncio.get_running_loop()
     )
     tasks.append(
-        asyncio.create_task(async_AudioStreamSTT(client2, "tests/test_1_resampled.wav", "Test2"), name="Test2"))
+        asyncio.create_task(async_AudioStreamSTT(client, "tests/test_woman_resampled16000.wav", "Test2"), name="Test2"))
+    client = TranscriptionClient(
+        ip,
+        port,
+        lang=None,
+        translate=False,
+        model="large-v2",
+        use_vad=False,
+        eventloop=asyncio.get_running_loop()
+    )
+    tasks.append(
+        asyncio.create_task(async_AudioStreamSTT(client, "tests/test_woman_resampled16000.wav", "Test3"), name="Test3"))
+    client = TranscriptionClient(
+        ip,
+        port,
+        lang=None,
+        translate=False,
+        model="large-v2",
+        use_vad=False,
+        eventloop=asyncio.get_running_loop()
+    )
+    tasks.append(
+        asyncio.create_task(async_AudioStreamSTT(client, "tests/test_woman_resampled16000.wav", "Test4"), name="Test4"))
+    # client = TranscriptionClient(
+    #     ip,
+    #     port,
+    #     lang=None,
+    #     translate=False,
+    #     model="large-v2",
+    #     use_vad=False,
+    #     eventloop=asyncio.get_running_loop()
+    # )
+    # tasks.append(
+    #     asyncio.create_task(async_AudioStreamSTT(client, "tests/test_woman_resampled16000.wav", "Test5"), name="Test4"))
+    # client2 = TranscriptionClient(
+    #     ip,
+    #     port,
+    #     lang=None,
+    #     translate=False,
+    #     model="large-v2",
+    #     use_vad=False,
+    #     eventloop=asyncio.get_running_loop()
+    # )
+    # tasks.append(
+    #     asyncio.create_task(async_AudioStreamSTT(client2, "tests/test_1_resampled.wav", "Test6"), name="Test5"))
 
     result = asyncio.gather(*tasks)
     await result
