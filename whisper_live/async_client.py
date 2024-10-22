@@ -1,22 +1,14 @@
 import asyncio
-import os
-import shutil
-import subprocess
+import json
+import time
+import uuid
 import wave
-
-import logging
-from typing import AsyncIterable, AsyncGenerator
+from typing import AsyncGenerator
 
 import numpy as np
 import pyaudio
-import threading
-import json
-import uuid
-import time
-import ffmpeg
-
 from websockets.asyncio.client import connect, ClientConnection
-from websockets.exceptions import ConnectionClosed, ConnectionClosedError
+from websockets.exceptions import ConnectionClosed
 
 import whisper_live.utils as utils
 
@@ -252,6 +244,7 @@ class AsyncClient:
         """
         try:
             await self.client_socket.close()
+            self.ws_connected = False
         except Exception as e:
             print("[ERROR]: Error closing WebSocket:", e)
 
@@ -315,7 +308,7 @@ class TranscriptionTeeClient:
             print(f"[WARN]: Unable to access microphone. {error}")
             self.stream = None
 
-    async def __call__(self, audio=None, async_audio_generator=None):
+    async def __call__(self, audio=None, async_audio_generator=None, async_queue=None):
         """
         Start the transcription process.
 
@@ -329,10 +322,17 @@ class TranscriptionTeeClient:
         """
         assert sum(
             source is not None for source in
-            [audio, async_audio_generator]
+            [audio, async_audio_generator, async_queue]
         ) <= 1, 'You must provide only one selected source'
 
-        await self.await_server_ready()
+        print("[INFO]: Waiting for server ready ...")
+        for client in self.clients:
+            # recording = True -> server is ready
+            while not client.recording:
+                await asyncio.sleep(0.1)
+                if client.waiting or client.server_error:
+                    await self.close_all_clients()
+                    return
 
         print("[INFO]: Server Ready!")
         # if hls_url is not None:
@@ -349,18 +349,8 @@ class TranscriptionTeeClient:
         #     self.eventloop.run_until_complete(self.stream_file_send(pcm_generator))
         elif async_audio_generator is not None:
             await self.streaming_audio(async_audio_generator)
-        else:
-            raise
-
-    async def await_server_ready(self):
-        print("[INFO]: Waiting for server ready ...")
-        for client in self.clients:
-            # recording = True -> server is ready
-            while not client.recording:
-                await asyncio.sleep(0.1)
-                if client.waiting or client.server_error:
-                    await self.close_all_clients()
-                    raise
+        elif async_queue is not None:
+            await self.streaming_queue(async_queue)
 
     async def close_all_clients(self):
         """Closes all client websockets."""
@@ -474,6 +464,35 @@ class TranscriptionTeeClient:
         except KeyboardInterrupt:
             await self.close_all_clients()
             self.write_all_clients_srt()
+            print("[INFO]: Keyboard interrupt.")
+
+    async def streaming_queue(self, queue: asyncio.Queue):
+        try:
+            while any(client.recording for client in self.clients):
+                data = await queue.get()
+                if data == b"END_OF_AUDIO":
+                    break
+
+                # audio_array = self.bytes_to_float_array(data)
+                await self.multicast_packet(data)
+                # self.stream.write(data)
+
+            start_time = time.time()
+            await self.multicast_packet(AsyncClient.END_OF_AUDIO.encode('utf-8'), True)
+            print("[INFO]: Sending end of audio.")
+
+            for client in self.clients:
+                await client.wait_before_disconnect()
+            self.write_all_clients_srt()
+            await self.close_all_clients()
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            print(f"Время обработки последнего сегмента : {elapsed_time:.4f} секунд")
+            return
+
+        except KeyboardInterrupt:
+            await self.close_all_clients()
+            # self.write_all_clients_srt()
             print("[INFO]: Keyboard interrupt.")
 
     def send_file(self, filename):
@@ -606,3 +625,6 @@ class AsyncTranscriptionClient(TranscriptionTeeClient):
             output_recording_filename=output_recording_filename,
             eventloop=eventloop
         )
+
+    async def get_text(self):
+        pass
