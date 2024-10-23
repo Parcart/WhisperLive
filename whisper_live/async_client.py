@@ -22,6 +22,7 @@ class AsyncClient:
 
     def __init__(
             self,
+            connection_id: str,
             host=None,
             port=None,
             lang=None,
@@ -62,6 +63,7 @@ class AsyncClient:
         self.ws_connected = False
         self.client_socket = None
         self.eventloop = eventloop
+        self.connection_id = connection_id
 
         if translate:
             self.task = "translate"
@@ -214,7 +216,8 @@ class AsyncClient:
                     "language": self.language,
                     "task": self.task,
                     "model": self.model,
-                    "use_vad": self.use_vad
+                    "use_vad": self.use_vad,
+                    "connection_id": self.connection_id
                 }
             )
         )
@@ -599,6 +602,7 @@ class AsyncTranscriptionClient(TranscriptionTeeClient):
             self,
             host,
             port,
+            connection_id: str,
             lang=None,
             translate=False,
             model="small",
@@ -611,7 +615,7 @@ class AsyncTranscriptionClient(TranscriptionTeeClient):
     ):
         if eventloop is None:
             eventloop = asyncio.get_event_loop()
-        self.client = AsyncClient(host, port, lang, translate, model, srt_file_path=output_transcription_path,
+        self.client = AsyncClient(connection_id, host, port, lang, translate, model, srt_file_path=output_transcription_path,
                                   use_vad=use_vad, log_transcription=log_transcription, eventloop=eventloop)
         if save_output_recording and not output_recording_filename.endswith(".wav"):
             raise ValueError(f"Please provide a valid `output_recording_filename`: {output_recording_filename}")

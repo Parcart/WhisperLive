@@ -4,7 +4,9 @@ import threading
 import json
 import functools
 import logging
+import uuid
 from enum import Enum
+from queue import Queue
 from typing import List, Optional
 
 import subprocess as sp
@@ -39,20 +41,48 @@ class ClientManager:
         self.max_clients = int(memory_free / 3584)
         print("INFO Max clients:", self.max_clients)
         print("INFO Memory:", memory_free)
+        self.ids_clients = {}
         self.clients = {}
         self.start_times = {}
         self.max_connection_time = max_connection_time
+        self.whisper_live_manager_websocket = None
+        self.responses = Queue()
+        self.server_thread = threading.Thread(target=self.run).start()
 
-    def add_client(self, websocket, client):
+    def handel_new_manager_connection(self, websocket):
+        if self.whisper_live_manager_websocket is not None:
+            self.whisper_live_manager_websocket.close(code=4017, reason="Another manager connected")
+        self.whisper_live_manager_websocket = websocket
+        websocket.send(json.dumps({"max_clients": self.max_clients}))
+        while True:
+            response = self.responses.get()
+            try:
+                websocket.send(response)
+            except ConnectionClosed:
+                self.responses.put(response)
+                break
+
+    def run(self):
+        with serve(
+                self.handel_new_manager_connection,
+                "0.0.0.0",
+                9091
+        ) as server:
+            server.serve_forever()
+
+    def add_client(self, websocket, client, connection_id: str):
         """
         Adds a client and their connection start time to the tracking dictionaries.
 
         Args:
             websocket: The websocket associated with the client to add.
             client: The client object to be added and tracked.
+            connection_id: id generated WhisperLive Manager
         """
         self.clients[websocket] = client
         self.start_times[websocket] = time.time()
+        self.ids_clients[websocket] = connection_id
+        self.responses.put(json.dumps({"event": "opened", "connection_id": connection_id}))
 
     def get_client(self, websocket):
         """
@@ -80,6 +110,8 @@ class ClientManager:
         if client:
             client.cleanup()
         self.start_times.pop(websocket, None)
+        connection_id = self.ids_clients.pop(websocket)
+        self.responses.put(json.dumps({"event": "closed", "connection_id": connection_id}))
 
     def get_wait_time(self):
         """
@@ -162,7 +194,7 @@ class TranscriptionServer:
 
     def initialize_client(
             self, websocket, options, faster_whisper_custom_model_path,
-            whisper_tensorrt_path, trt_multilingual
+            whisper_tensorrt_path, trt_multilingual, connection_id
     ):
         client: Optional[ServeClientBase] = None
 
@@ -209,7 +241,7 @@ class TranscriptionServer:
         if client is None:
             raise ValueError(f"Backend type {self.backend.value} not recognised or not handled.")
 
-        self.client_manager.add_client(websocket, client)
+        self.client_manager.add_client(websocket, client, connection_id)
 
     def get_audio_from_websocket(self, websocket):
         """
@@ -234,6 +266,8 @@ class TranscriptionServer:
             options = websocket.recv()
             options = json.loads(options)
             self.use_vad = options.get('use_vad')
+            connection_id = options.get('connection_id')
+
             if self.client_manager.is_server_full(websocket, options):
                 websocket.close()
                 return False  # Indicates that the connection should not continue
@@ -241,7 +275,7 @@ class TranscriptionServer:
             if self.backend.is_tensorrt():
                 self.vad_detector = VoiceActivityDetector(frame_rate=self.RATE)
             self.initialize_client(websocket, options, faster_whisper_custom_model_path,
-                                   whisper_tensorrt_path, trt_multilingual)
+                                   whisper_tensorrt_path, trt_multilingual, connection_id)
             return True
         except json.JSONDecodeError:
             logging.error("Failed to decode JSON from client")
@@ -843,7 +877,6 @@ class ServeClientFasterWhisper(ServeClientBase):
             self.websocket.close(code=1011, reason=str(e))
             raise e
 
-
         self.use_vad = use_vad
 
         self.file_ended = False
@@ -1031,7 +1064,6 @@ class ServeClientFasterWhisper(ServeClientBase):
 
             if self.frames_np is None:
                 continue
-
 
             self.clip_audio_if_no_valid_segment()
 
