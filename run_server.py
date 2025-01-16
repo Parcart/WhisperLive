@@ -67,6 +67,7 @@ if __name__ == "__main__":
     from whisper_live.server import TranscriptionServer
 
     if args.rabbitmq_host:
+        print(args.rabbitmq_port)
         rabbitmq_consumer = RabbitMQConsumer(args.rabbitmq_host, args.rabbitmq_port, whisper_port=args.port).run()
 
     server = TranscriptionServer(single_model=not args.no_single_model)

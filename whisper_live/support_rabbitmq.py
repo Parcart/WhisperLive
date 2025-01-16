@@ -4,7 +4,7 @@ import time
 import pika
 import json
 
-from whisper_live.client import TranscriptionClient
+from .client import TranscriptionClient
 
 
 class RabbitMQConsumer:

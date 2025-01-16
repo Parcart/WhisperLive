@@ -11,4 +11,8 @@ evaluate
 numpy<2
 openai-whisper==20240930
 tokenizers==0.20.3
+PyAudio
+ffmpeg-python
+scipy
+websocket-client
 pika
