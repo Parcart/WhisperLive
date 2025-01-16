@@ -260,18 +260,15 @@ class AsyncClient:
         """
         return self.client_socket
 
-    def write_srt_file(self, output_path="output.srt"):
+    def write_transcript(self):
         """
-        Writes out the transcript in .srt format.
+        Writes out the transcript in self.transcript.
 
-        Args:
-            message (output_path, optional): The path to the target file.  Default is "output.srt".
-
-        """
+       """
         if self.server_backend == "faster_whisper":
             if (self.last_segment):
                 self.transcript.append(self.last_segment)
-            utils.create_srt_file(self.transcript, output_path)
+            # utils.create_srt_file(self.transcript, output_path)
 
     async def wait_before_disconnect(self):
         """Waits a bit before disconnecting in order to process pending responses."""
@@ -363,7 +360,7 @@ class TranscriptionTeeClient:
     def write_all_clients_srt(self):
         """Writes out .srt files for all clients."""
         for client in self.clients:
-            client.write_srt_file(client.srt_file_path)
+            client.write_transcript(client.srt_file_path)
 
     async def multicast_packet(self, packet, unconditional=False):
         """

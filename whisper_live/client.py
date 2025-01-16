@@ -87,7 +87,7 @@ class Client:
         Client.INSTANCES[self.uid] = self
 
         # start websocket client in a thread
-        self.ws_thread =  threading.Thread(target=self.client_socket.run_forever, daemon=True)
+        self.ws_thread = threading.Thread(target=self.client_socket.run_forever, daemon=True)
         self.ws_thread.start()
 
         self.transcript = []
@@ -203,7 +203,8 @@ class Client:
                     "language": self.language,
                     "task": self.task,
                     "model": self.model,
-                    "use_vad": self.use_vad
+                    "use_vad": self.use_vad,
+                    "connection_id": self.uid
                 }
             )
         )
@@ -310,7 +311,7 @@ class TranscriptionTeeClient:
             print(f"[WARN]: Unable to access microphone. {error}")
             self.stream = None
 
-    def __call__(self, audio=None, rtsp_url=None, hls_url=None, file_async_generator=None, save_file=None,
+    def __call__(self, audio=None, audio_data=None, rtsp_url=None, hls_url=None, file_async_generator=None, save_file=None,
                  pcm_generator=None, event_loop=None):
         """
         Start the transcription process.
@@ -335,7 +336,9 @@ class TranscriptionTeeClient:
                     return
 
         print("[INFO]: Server Ready!")
-        if hls_url is not None:
+        if audio_data is not None:
+            self.send_data(audio_data)
+        elif hls_url is not None:
             self.process_hls_stream(hls_url, save_file)
         elif audio is not None:
             resampled_file = utils.resample(audio)
@@ -432,26 +435,15 @@ class TranscriptionTeeClient:
                 self.write_all_clients_srt()
                 print("[INFO]: Keyboard interrupt.")
 
-    async def streaming_audio(self, request_iterator: AsyncGenerator[bytes, None]):
+    def send_data(self, audio_data: bytes):
         try:
-            data = None
-            while any(client.recording for client in self.clients):
-                if data is not None:
-                    break
-                async for data in request_iterator:
-                    if data == b"":
-                        break
-
-                    audio_array = self.bytes_to_float_array(data)
-                    self.multicast_packet(audio_array.tobytes())
-                    # self.stream.write(data)
+            self.multicast_packet(audio_data)
 
             self.multicast_packet(Client.END_OF_AUDIO.encode('utf-8'), True)
 
             for client in self.clients:
                 client.wait_before_disconnect()
             self.write_all_clients_srt()
-            self.stream.close()
             self.close_all_clients()
             return
 
@@ -498,8 +490,6 @@ class TranscriptionTeeClient:
                 self.close_all_clients()
                 self.write_all_clients_srt()
                 print("[INFO]: Keyboard interrupt.")
-
-
 
     def process_rtsp_stream(self, rtsp_url):
         """

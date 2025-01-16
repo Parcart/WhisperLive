@@ -1,6 +1,10 @@
 import argparse
 import os
 
+from faster_whisper import download_model
+
+from whisper_live.support_rabbitmq import RabbitMQConsumer
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', '-p',
@@ -28,6 +32,11 @@ if __name__ == "__main__":
     parser.add_argument('--no_single_model', '-nsm',
                         action='store_true',
                         help='Set this if every connection should instantiate its own model. Only relevant for custom model, passed using -trt or -fw.')
+    parser.add_argument('--rabbitmq_host', '-rh',
+                        help="RabbitMQ host name")
+    parser.add_argument('--rabbitmq_port', '-rp',
+                        type=int,
+                        help="RabbitMQ port")
     args = parser.parse_args()
 
     if args.backend == "tensorrt":
@@ -41,6 +50,12 @@ if __name__ == "__main__":
         if os.environ["NSM_FLAG"] == "-nsm":
             args.no_single_model = True
 
+    download_model(
+        'large-v2',
+        local_files_only=False,
+        cache_dir=None,
+    )
+
     # if "LD_LIBRARY_PATH" not in os.environ:
     #     import nvidia.cublas.lib
     #     import nvidia.cudnn.lib
@@ -49,8 +64,11 @@ if __name__ == "__main__":
     # else:
     #     print("LD_LIBRARY_PATH already set. Skipping.", os.environ["LD_LIBRARY_PATH"])
 
-
     from whisper_live.server import TranscriptionServer
+
+    if args.rabbitmq_host:
+        rabbitmq_consumer = RabbitMQConsumer(args.rabbitmq_host, args.rabbitmq_port, whisper_port=args.port).run()
+
     server = TranscriptionServer(single_model=not args.no_single_model)
     server.run(
         "0.0.0.0",
@@ -61,3 +79,6 @@ if __name__ == "__main__":
         trt_multilingual=args.trt_multilingual,
         single_model=not args.no_single_model,
     )
+
+    if args.rabbitmq_host:
+        rabbitmq_consumer.stop()

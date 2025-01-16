@@ -1,6 +1,7 @@
 import asyncio
 import multiprocessing
 import time
+import uuid
 import wave
 # import aiofiles
 import aiofiles
@@ -8,7 +9,9 @@ import pyaudio
 
 from whisper_live.async_client import AsyncTranscriptionClient as TranscriptionClient
 import whisper_live.utils as utils
+
 result = []
+
 
 # client = TranscriptionClient(
 #     "localhost",
@@ -89,6 +92,7 @@ async def create_and_run_tasks(ip="localhost", port=9090):
         ip,
         port,
         lang=None,
+        connection_id=uuid.uuid4().hex,
         translate=False,
         model="large-v2",
         use_vad=False,
@@ -159,8 +163,8 @@ async def create_and_run_tasks(ip="localhost", port=9090):
 
 async def main():
     # await create_and_run_tasks()
-    ip = "213.181.122.2"
-    port = 40064
+    ip = "localhost"
+    port = 9090
     result = asyncio.gather(create_and_run_tasks(ip, port))
     await result
     pass

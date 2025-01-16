@@ -50,6 +50,7 @@ class ClientManager:
         self.server_thread = threading.Thread(target=self.run).start()
 
     def handel_new_manager_connection(self, websocket):
+        print("INFO: New manager connection")
         if self.whisper_live_manager_websocket is not None:
             self.whisper_live_manager_websocket.close(code=4017, reason="Another manager connected")
         self.whisper_live_manager_websocket = websocket
@@ -63,6 +64,7 @@ class ClientManager:
                 break
 
     def run(self):
+        print("INFO Manager running")
         with serve(
                 self.handel_new_manager_connection,
                 "0.0.0.0",
@@ -399,6 +401,12 @@ class TranscriptionServer:
                 )
                 logging.info(f"Loaded {backend}")
         else:
+            # WhisperModel(
+            #     model_size_or_path="large-v2",
+            #     device=device,
+            #     compute_type=compute_type,
+            #     local_files_only=False,
+            # )
             logging.info(f"Load no single mode {backend}")
 
         if not BackendType.is_valid(backend):
@@ -849,7 +857,7 @@ class ServeClientFasterWhisper(ServeClientBase):
         self.task = task
         self.initial_prompt = initial_prompt
         self.vad_parameters = vad_parameters or {"threshold": 0.5}
-        self.no_speech_thresh = 0.45
+        self.no_speech_thresh = 0.68
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda":
