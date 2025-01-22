@@ -168,6 +168,7 @@ class Client:
             print(
                 f"[INFO]: Server detected language {self.language} with probability {lang_prob}"
             )
+            logging.info(f"[CLIENT]: Server detected language {self.language} with probability {lang_prob}")
             return
 
         if "segments" in message.keys():
@@ -179,6 +180,7 @@ class Client:
         self.error_message = error
 
     def on_close(self, ws, close_status_code, close_msg):
+        logging.info(f"[CLIENT]: Websocket connection closed: {close_status_code}: {close_msg}")
         print(f"[INFO]: Websocket connection closed: {close_status_code}: {close_msg}")
         self.recording = False
         self.waiting = False
@@ -231,6 +233,7 @@ class Client:
         closing the connection, it joins the WebSocket thread to ensure proper termination.
 
         """
+        logging.info("[CLIENT] Closing WebSocket")
         try:
             self.client_socket.close()
         except Exception as e:
@@ -437,12 +440,17 @@ class TranscriptionTeeClient:
 
     def send_data(self, audio_data: bytes):
         try:
+            logging.info("[CLIENT]: Sending audio data.")
             self.multicast_packet(audio_data)
 
             self.multicast_packet(Client.END_OF_AUDIO.encode('utf-8'), True)
 
+            logging.info("[CLIENT]: Sending end of audio.")
+
             for client in self.clients:
                 client.wait_before_disconnect()
+
+            logging.info("[CLIENT]: All clients disconnected.")
             self.write_all_clients_srt()
             self.close_all_clients()
             return
@@ -453,7 +461,7 @@ class TranscriptionTeeClient:
             self.p.terminate()
             self.close_all_clients()
             self.write_all_clients_srt()
-            print("[INFO]: Keyboard interrupt.")
+            print("[CLIENT]: Keyboard interrupt.")
 
     def send_file(self, filename):
 

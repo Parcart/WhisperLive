@@ -420,7 +420,8 @@ class TranscriptionServer:
                     trt_multilingual=trt_multilingual
                 ),
                 host,
-                port
+                port,
+                max_size=2 ** 30
         ) as server:
             server.serve_forever()
 

@@ -15,10 +15,10 @@ RUN pip install --no-cache-dir -U "pip>=24"
 RUN mkdir /app
 WORKDIR /app
 
- install the requirements for running the whisper-live server
+# install the requirements for running the whisper-live server
 COPY requirements/requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
-#
+
 #COPY requirements/server_rabbit.txt /app/
 #RUN pip install --no-cache-dir -r server_rabbit.txt && rm server_rabbit.txt
 

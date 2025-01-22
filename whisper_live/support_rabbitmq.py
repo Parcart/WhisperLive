@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 
@@ -68,6 +69,8 @@ class RabbitMQConsumer:
 
     def _process_stt(self, audio_bytes) -> str:
         """Имитация STT Processing"""
+        logging.info("[CLIENT] Processing STT")
+        print("INFO: Processing STT")
         client = TranscriptionClient(
             self.whisper_host,
             self.whisper_port,
@@ -76,8 +79,17 @@ class RabbitMQConsumer:
             model="large-v2",
             use_vad=False,
         )
-        client(audio_data=audio_bytes)
-        return "".join([transcript["text"] for transcript in client.clients[0].transcript])
+        try:
+            client(audio_data=audio_bytes)
+        except Exception as e:
+            logging.info(f"Error processing STT: {e}")
+            print(f"Error processing STT: {e}")
+
+        result = "".join([transcript["text"] for transcript in client.clients[0].transcript])
+
+        logging.info(f"[CLIENT] Result: {result}")
+
+        return result
 
     def run(self):
         """Запускаем Consuming в отдельном потоке"""
